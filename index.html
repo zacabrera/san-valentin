@@ -96,17 +96,62 @@
             100% { transform: translateY(0) rotate(-6deg); }
         }
 
-        /* audio: intentamos reproducir sin interacción; si el navegador lo bloquea mantendremos reproducción en mute
-           (no se muestra ningún botón para el usuario) */
+          /* audio: intentamos reproducir sin interacción; si el navegador lo bloquea mantendremos reproducción en mute
+              (no se muestra ningún botón invasivo para el usuario). Si falla, mostramos un control discreto en la esquina
+              para diagnóstico y para permitir activar sonido manualmente. */
+
+          /* audio control (discreto) */
+          .audio-control {
+                position: fixed;
+                left: 12px;
+                bottom: 12px;
+                z-index: 80;
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                background: rgba(255,255,255,0.9);
+                padding: 6px 8px;
+                border-radius: 999px;
+                box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+                font-size: 0.9rem;
+                color: #333;
+          }
+          .audio-toggle { background: none; border: none; cursor: pointer; font-size: 1.1rem; }
+          .audio-status { font-size: 0.85rem; }
+
+        /* start overlay */
+        .start-overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            /* cubrir totalmente y ocultar el contenido detrás: fondo opaco igual al fondo de la página */
+            background: var(--bg-color);
+            z-index: 120;
+        }
+        .start-button {
+            background: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 16px 24px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.28);
+        }
 
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h2>Para el amor de mi vida:</h2>
+    <div id="start-overlay" class="start-overlay">
+        <button id="start-button" class="start-button">Iniciar</button>
+    </div>
+
+    <div class="container" style="visibility:hidden;">
+        <h2>Para Agus:</h2>
         <p id="phrase1">Si pudiera elegir un lugar seguro, sería a tu lado.</p>
-        <p id="phrase2">Cuanto más tiempo estoy contigo más te amo.</p>
+        <p id="phrase2">Cuanto más tiempo estoy con vos, más te amo.</p>
         
         <div class="timer">
             Mi amor por ti comenzó hace...
@@ -117,7 +162,13 @@
     <!-- audio de fondo: pon aquí tu archivo MP3 en el root y renómbralo a `background.mp3` o ajusta el src -->
     <audio id="bg-music" src="background.mp3" preload="auto" loop></audio>
 
-    <div class="tree-container" id="tree">
+    <!-- estado / control de audio (se muestra solo si es necesario) -->
+    <div id="audio-control" style="display:none" aria-hidden="true" class="audio-control">
+        <button id="audio-toggle" class="audio-toggle" title="Activar / desactivar sonido">🔈</button>
+        <div id="audio-status" class="audio-status">audio: inicializando...</div>
+    </div>
+
+    <div class="tree-container" id="tree" style="visibility:hidden;">
         <div class="trunk"></div>
     </div>
 
@@ -127,7 +178,7 @@
         // Ejemplo: 22 de febrero de 2025 a las 13:36
         const startDate = new Date(2019, 3, 3, 15, 0, 0); 
 
-        // --- CONTADOR ---
+    // --- CONTADOR ---
         function updateTimer() {
             const now = new Date();
             const diff = now - startDate;
@@ -141,7 +192,13 @@
                 `${days} días ${hours} horas ${minutes} minutos ${seconds} segundos`;
         }
 
-        setInterval(updateTimer, 1000);
+        // Timer won't start until the user clicks "Iniciar". We'll start it from startEverything().
+        let _timerInterval = null;
+        function startTimer() {
+            if (_timerInterval) return;
+            updateTimer();
+            _timerInterval = setInterval(updateTimer, 1000);
+        }
 
         // --- ÁRBOL DE CORAZONES ---
         const tree = document.getElementById('tree');
@@ -285,6 +342,78 @@
         // --- AUDIO DE FONDO ---
         const bgAudio = document.getElementById('bg-music');
 
+        // small UI helpers for status/control
+        const audioControl = document.getElementById('audio-control');
+        const audioStatusEl = document.getElementById('audio-status');
+        const audioToggle = document.getElementById('audio-toggle');
+
+        function updateAudioStatus(msg) {
+            try { if (audioStatusEl) audioStatusEl.textContent = `audio: ${msg}`; } catch (e) {}
+            console.log('[audio]', msg);
+        }
+
+        function showAudioControl() {
+            if (!audioControl) return;
+            audioControl.style.display = 'flex';
+            updateAudioToggle();
+        }
+
+        function updateAudioToggle() {
+            if (!audioToggle || !bgAudio) return;
+            audioToggle.textContent = bgAudio.muted ? '🔇' : '🔈';
+        }
+
+        audioToggle && audioToggle.addEventListener('click', async () => {
+            if (!bgAudio) return;
+            try {
+                bgAudio.muted = !bgAudio.muted;
+                if (bgAudio.paused) await bgAudio.play();
+                updateAudioToggle();
+                updateAudioStatus(bgAudio.muted ? 'silenciado manualmente' : 'sonando (manual)');
+            } catch (e) {
+                console.warn('Error al cambiar estado de audio:', e);
+                updateAudioStatus('error al activar audio');
+            }
+        });
+
+        // Fallback: intentar iniciar audio al PRIMER gesto del usuario en la página.
+        // No es un botón visible específico: cualquier interacción cuenta (click, tecla, touch, scroll).
+        let _gestureHandlersAttached = false;
+        function attachGestureStartListeners() {
+            if (_gestureHandlersAttached) return;
+            _gestureHandlersAttached = true;
+            const oncePlay = async (ev) => {
+                try {
+                    // intentar reproducir con sonido (es el gesto del usuario)
+                    bgAudio.muted = false;
+                    bgAudio.volume = 0.6;
+                    const p = bgAudio.play();
+                    if (p && p instanceof Promise) await p;
+                    updateAudioStatus('iniciada tras interacción del usuario');
+                    updateAudioToggle();
+                    detachGestureStartListeners();
+                    // si todo ok, ocultar control si estaba visible
+                    if (audioControl) audioControl.style.display = 'none';
+                } catch (err) {
+                    console.warn('No se pudo reproducir tras gesto del usuario:', err);
+                    updateAudioStatus('no fue posible iniciar audio tras interacción');
+                    // dejar el control visible para que pueda activarlo manualmente
+                    showAudioControl();
+                    detachGestureStartListeners();
+                }
+            };
+
+            // eventos que consideramos gesto del usuario
+            ['pointerdown', 'touchstart', 'keydown', 'scroll'].forEach((evName) => {
+                window.addEventListener(evName, oncePlay, { once: true, passive: true });
+            });
+        }
+
+        function detachGestureStartListeners() {
+            // No-op: we used {once:true} so handlers are removed automatically.
+            _gestureHandlersAttached = false;
+        }
+
         // Intento de reproducción sin interacción:
         // 1) Intentar play() con sonido directamente.
         // 2) Si falla, reproducir en mute (la mayoría de navegadores permiten autoplay si está muteado).
@@ -314,10 +443,11 @@
                 bgAudio.volume = targetVolume;
                 const p = bgAudio.play();
                 if (p && p instanceof Promise) await p;
-                console.log('Música de fondo iniciada con sonido');
+                updateAudioStatus('iniciada con sonido');
                 return;
             } catch (err) {
                 console.warn('Autoplay con sonido bloqueado, intentando reproducir en mute:', err);
+                updateAudioStatus('autoplay con sonido bloqueado, intentando mute');
             }
 
             // reproducir en mute (si autoplay con sonido fue bloqueado)
@@ -326,7 +456,10 @@
                 bgAudio.volume = 0;
                 const p2 = bgAudio.play();
                 if (p2 && p2 instanceof Promise) await p2;
-                console.log('Reproducción en mute iniciada (autoplay permitido en mute).');
+                updateAudioStatus('reproducción en mute iniciada');
+                // mostrar control discreto para permitir activar sonido manualmente si el navegador
+                // impide desmutear automáticamente
+                showAudioControl();
 
                 // después de un pequeño retardo, intentar desmutear gradualmente
                 setTimeout(async () => {
@@ -335,11 +468,15 @@
                         // aún pueden bloquear el cambio a sonido real; por eso lo hacemos en try/catch.
                         bgAudio.muted = false;
                         rampVolume(targetVolume, rampDuration);
-                        console.log('Intentando subir volumen tras autoplay en mute');
+                        updateAudioStatus('intentando subir volumen tras autoplay en mute');
+                        // actualizar UI
+                        updateAudioToggle();
                     } catch (e) {
                         console.warn('No fue posible desmutear automáticamente:', e);
+                        updateAudioStatus('no fue posible desmutear automáticamente');
                         // dejar en mute si no es posible
                         bgAudio.muted = true;
+                        showAudioControl();
                     }
                 }, 800);
 
@@ -349,23 +486,41 @@
             }
         }
 
-        window.onload = () => {
-            updateTimer();
-
-            // intentar iniciar la música de fondo; si el navegador bloquea el autoplay,
-            // se mostrará un overlay con un botón para que el usuario la active.
+        // start everything when user clicks the start button (or interacts)
+        function startEverything() {
+            const overlay = document.getElementById('start-overlay');
+            if (overlay) overlay.style.display = 'none';
+            // mostrar contenido
+            try { document.querySelector('.container').style.visibility = 'visible'; } catch(e){}
+            try { document.getElementById('tree').style.visibility = 'visible'; } catch(e){}
+            // start timer
+            startTimer();
+            // intentar iniciar la música de fondo
             tryPlayBackground();
-
-            // revelar texto letra a letra
+            // revelar texto
             revealText(document.querySelector('h2') || document.querySelector('h1'), 40, 200);
             revealText(document.getElementById('phrase1'), 18, 600);
             revealText(document.getElementById('phrase2'), 18, 1200);
-
-            // Esperar un frame para asegurar layout aplicado, luego crear corazones
+            // crear corazones tras asegurar layout
             requestAnimationFrame(() => setTimeout(() => {
                 createHeart();
                 createTrunkHearts();
             }, 600));
+            // hide the small audio control because the user explicitly started
+            try { const ac = document.getElementById('audio-control'); if (ac) ac.style.display = 'none'; } catch(e){}
+        }
+
+        window.onload = () => {
+            // attach start button
+            const startBtn = document.getElementById('start-button');
+            if (startBtn) startBtn.addEventListener('click', startEverything);
+            // also allow any user gesture to start the experience (click anywhere, key, touch, scroll)
+            ['pointerdown','touchstart','keydown','scroll'].forEach(ev => {
+                window.addEventListener(ev, function onceStart() {
+                    startEverything();
+                    window.removeEventListener(ev, onceStart);
+                }, { once: true, passive: true });
+            });
         };
     </script>
 </body>
