@@ -29,12 +29,23 @@
             text-align: left;
             width: 80%;
             max-width: 600px;
-            z-index: 20; /* por encima del árbol para que no quede tapado */
+            position: relative;
+            z-index: 100; /* siempre al frente del árbol */
             pointer-events: auto;
         }
 
-        h2 { font-weight: 300; margin-bottom: 10px; }
-        p { font-style: italic; font-size: 1.2rem; line-height: 1.6; }
+        h2 { 
+            font-weight: 600; 
+            margin-bottom: 10px;
+            text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8);
+        }
+        p { 
+            font-style: italic; 
+            font-size: 1.2rem; 
+            line-height: 1.6;
+            font-weight: 500;
+            text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8);
+        }
 
         /* Estilo del contador */
         .timer {
@@ -150,11 +161,11 @@
 
     <div class="container" style="visibility:hidden;">
         <h2>Para Agus:</h2>
-        <p id="phrase1">Si pudiera elegir un lugar seguro, sería a tu lado.</p>
+        <p id="phrase1">Si pudiera elegir un lugar seguro, no deberia pensarlo porque ya lo tengo con vos.</p>
         <p id="phrase2">Cuanto más tiempo estoy con vos, más te amo.</p>
         
         <div class="timer">
-            Mi amor por ti comenzó hace...
+            Mi amor por vos comenzó hace...
             <span id="counter">Cargando tiempo...</span>
         </div>
     </div>
